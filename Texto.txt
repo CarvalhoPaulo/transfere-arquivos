@@ -8,3 +8,11 @@ quarkus.rest-client."meu-servico".key-store.pem.keys=caminho/para/cliente-chave.
 # Ignorar a validação do certificado do servidor (Trust All)
 quarkus.rest-client."meu-servico".trust-all=true
 quarkus.rest-client."meu-servico".verify-host=false
+
+quarkus.rest-client."meu-servico".key-store=caminho/para/cliente-bundle.p12
+quarkus.rest-client."meu-servico".key-store-password=sua_senha
+quarkus.rest-client."meu-servico".key-store-type=PKCS12
+
+# Ignorando a TrustStore (Validação do Servidor)
+quarkus.tls.tls-disabled.trust-all=true
+quarkus.rest-client."meu-servico".verify-host=false
