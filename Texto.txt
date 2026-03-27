@@ -1,1 +1,10 @@
 https://teams.microsoft.com/meet/22730664800661?p=F5lfSHPQXGpEzQOpTx
+
+# Configurações do seu certificado (mTLS)
+quarkus.rest-client."meu-servico".key-store=pem
+quarkus.rest-client."meu-servico".key-store.pem.certs=caminho/para/cliente-cert.pem
+quarkus.rest-client."meu-servico".key-store.pem.keys=caminho/para/cliente-chave.key
+
+# Ignorar a validação do certificado do servidor (Trust All)
+quarkus.rest-client."meu-servico".trust-all=true
+quarkus.rest-client."meu-servico".verify-host=false
