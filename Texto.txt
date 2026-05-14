@@ -16,3 +16,6 @@ quarkus.rest-client."meu-servico".key-store-type=PKCS12
 # Ignorando a TrustStore (Validação do Servidor)
 quarkus.tls.tls-disabled.trust-all=true
 quarkus.rest-client."meu-servico".verify-host=false
+
+
+https://teams.microsoft.com/meet/22730664800661?p=F5lfSHPQXGpEzQOpTx
