@@ -1,21 +1,125 @@
-https://teams.microsoft.com/meet/22730664800661?p=F5lfSHPQXGpEzQOpTx
+# Plano de Ação - Fábrica de Software Autônoma (Fullstack)
 
-# Configurações do seu certificado (mTLS)
-quarkus.rest-client."meu-servico".key-store=pem
-quarkus.rest-client."meu-servico".key-store.pem.certs=caminho/para/cliente-cert.pem
-quarkus.rest-client."meu-servico".key-store.pem.keys=caminho/para/cliente-chave.key
+Este documento apresenta o plano de ação detalhado para o desenvolvimento do backend e do frontend da **Fábrica de Software Autônoma**. O planejamento baseia-se na aplicação base existente (que já possui SSO e cadastros de projetos/módulos configurados) e no reaproveitamento de componentes do motor de IA.
 
-# Ignorar a validação do certificado do servidor (Trust All)
-quarkus.rest-client."meu-servico".trust-all=true
-quarkus.rest-client."meu-servico".verify-host=false
+---
 
-quarkus.rest-client."meu-servico".key-store=caminho/para/cliente-bundle.p12
-quarkus.rest-client."meu-servico".key-store-password=sua_senha
-quarkus.rest-client."meu-servico".key-store-type=PKCS12
+## 1. Escopo e Objetivos do Projeto
 
-# Ignorando a TrustStore (Validação do Servidor)
-quarkus.tls.tls-disabled.trust-all=true
-quarkus.rest-client."meu-servico".verify-host=false
+O objetivo principal é o desenvolvimento de uma plataforma fullstack para gerenciar a execução de workflows de Agentes de IA que automatizam o ciclo de desenvolvimento de software de uma fábrica.
 
+### A. Escopo do Backend (Conformidade com [openapi.yaml](file:///c:/Foton/FabricaSoftware/Backend/openapi.yaml))
+*   **Reestruturação**: Restruturação das APIs e funcionalidades de cadastro de Projetos e Módulos já existentes.
+*   **Transição de Motor**: Evolução do motor de workflow atual (que é fixo) para um motor dinâmico e persistente que orquestra agentes de acordo com o configurado no banco de dados.
+*   **20 Endpoints RESTful**: Gestão e controle dinâmico de Projetos, Módulos, Demandas, Workflows, Agentes, Execuções e Auditoria.
+*   **Auditoria de Ações**: Rastreabilidade completa das ações executadas por cada usuário autenticado pelo SSO, registrando detalhes e data/hora de criações, edições e transições de workflow (aprovação, rejeição, correção).
+*   **Scripts de Permissão**: Criação de scripts SQL e configurações de acesso para as roles do SSO (que já está configurado no backend/frontend base).
+*   **Gestão de Conhecimento**: Cadastro de conhecimentos associados a agentes e uploads de arquivos para repositório/storage.
 
-https://teams.microsoft.com/meet/22730664800661?p=F5lfSHPQXGpEzQOpTx
+### B. Escopo do Frontend (Interface Visual Angular)
+*   **Reestruturação**: Ajustes no layout existente e reestruturação das telas de listagem e cadastro de Projetos e Módulos.
+*   **Gestão de Demandas**: Cadastro e detalhamento das demandas de um projeto, permitindo gerar o prompt formatado e disparar a execução de workflow.
+*   **Painel de Execução e Gestão (Human-in-the-Loop)**:
+    *   **Duas Telas Principais**:
+        *   **Tela de Acompanhamento do Workflow**: Exibe o fluxo sequencial de agentes do workflow (etapas). Permite identificar claramente quais etapas estão concluídas, quais estão em andamento e quais estão aguardando as etapas anteriores para iniciar. O status exibido de cada etapa reflete diretamente o status de execução de cada agente.
+        *   **Tela de Detalhes do Agente**: Acessada ao clicar em um agente na tela de acompanhamento. Permite visualizar em tempo real os logs detalhados de execução do agente, seus parâmetros e outras informações técnicas.
+            *   **Exibição de Artefatos**: Caso a execução do agente tenha sido concluída, exibe os artefatos (arquivos) gerados, alterados ou removidos pelo agente.
+            *   **Interação Humana (Loop Humano)**: Caso a execução esteja com o status `AGUARDANDO_APROVACAO`, disponibiliza as ações:
+                1. **Aprovar**: Dispara o avanço da execução para o próximo agente (via endpoint `/aprovar`).
+                2. **Rejeitar**: Aborta a execução do workflow marcando-a como falha/erro (via endpoint `/rejeitar`).
+                3. **Solicitar Correção**: Permite digitar um prompt adicional (`promptExtra`) orientando ajustes para que o agente repita seu processamento (via endpoint `/corrigir`).
+*   **Limitação de Escopo no Frontend (Fase 1)**: Telas de criação/editação de Workflows e Agentes foram retiradas do escopo inicial da UI. Essas configurações serão inseridas diretamente via Banco de Dados e API por administradores técnicos no primeiro momento.
+
+---
+
+## 2. Perfis dos Desenvolvedores e Divisão de Responsabilidades
+
+*   **Eliabe (Frontend / Apoio Backend)**: Responsável principal pelo frontend Angular, assumindo também tarefas integradas de backend (como endpoints de cadastro e APIs de controle do loop humano).
+*   **Gustavo (Backend)**: Desenvolvedor backend Java/Spring Boot focado em modelagem de dados, endpoints REST de cadastros, regras de negócio de apoio e toda a integração e sandbox (Docker/Git) do Coding Agent.
+*   **Paulo (Backend)**: Desenvolvedor backend Java/Spring Boot focado no motor de workflows dinâmico, orquestração assíncrona, inicialização do Agente Genérico, registro de tools padrão, gerenciador de workspaces Git e gestão de conhecimento.
+
+---
+
+## 3. Motor de Workflows e Loop Humano (Human-in-the-Loop)
+
+1.  **Fluxo de Execução Sequencial**: O orquestrador dispara as tarefas dos agentes um a um. O agente $N$ só executa após o encerramento do agente $N-1$ com status `SUCESSO`.
+2.  **Interrupção / Persistência**: Ao final de um passo, o motor verifica se o agente atual possui a flag `exigeAprovacaoHumana` ativa.
+    *   Em caso positivo, o status da `ExecucaoWorkflow` transita para `AGUARDANDO_APROVACAO`. A thread é desalocada e o estado é persistido no banco de dados.
+    *   Em caso negativo, o motor inicia imediatamente a chamada do próximo agente.
+3.  **Controle de Ações pelo Frontend**:
+    *   **Aprovar**: O frontend chama o endpoint `/execucao-workflow/{id}/aprovar` via requisição POST. O backend atualiza o status para `EXECUTANDO` e invoca o próximo agente.
+    *   **Rejeitar**: O frontend chama o endpoint `/execucao-workflow/{id}/rejeitar` via requisição POST. O backend altera o status para `ERRO` e aborta a execução do workflow.
+    *   **Corrigir / Solicitar Correção**: O usuário insere um texto detalhando correções. O frontend chama o endpoint `/execucao-workflow/{id}/corrigir` via requisição POST enviando o `promptExtra`. O backend concatena o texto às instruções originais e reinicia a execução do mesmo agente.
+
+---
+
+## 4. Agentes do Workflow: Agente Genérico e Agente de Codificação
+
+O fluxo de trabalho suporta a orquestração de múltiplos agentes de IA cadastrados, com regras específicas de acesso aos repositórios de código do projeto:
+
+### A. O Agente Genérico
+1.  **Instanciação Dinâmica**: Cada passo do workflow pode instanciar um Agente Genérico utilizando as informações cadastradas pelo usuário: o `systemPrompt`, a lista de `Tools` vinculadas e os arquivos de `Conhecimento` associados.
+2.  **Preparação do Workspace Local**: Durante a execução do passo, o sistema prepara um diretório local contendo o clone e atualização dos repositórios de código do projeto e de seus módulos (operações de `clone`, `fetch`, `pull` e `checkout`).
+3.  **Restrição de Segurança e Exceção**: O Agente Genérico possui acesso aos arquivos dos repositórios de código (projetos e módulos) estritamente sob o modo **Somente Leitura** (*Read-Only*). Contudo, ele possui permissão de **Escrita** para repositórios Git dedicados a **documentação** (permitindo clone, pull, modificação, commit e push de arquivos de documentação).
+
+### B. O Agente de Codificação (Coding Agent)
+1.  **Orquestrador Final com Escrita**: O Coding Agent é o agente final do workflow, encarregado de consolidar as propostas e aplicar as alterações no código-fonte.
+2.  **Modificação e Publicação (Escrita)**: É o único agente com permissão para alterar os arquivos do repositório local. Ao final do passo, ele realiza a validação do código, cria a branch de feature, realiza os *commits* e faz o *push* das alterações para o repositório Git remoto.
+3.  **Sandbox de Compilação e Validação**: Executa comandos de build e teste baseando-se na tecnologia do módulo (ex: `mvn clean test` para Java/Spring) em um contêiner Docker efêmero isolado. Implementa fluxo de auto-correção com base em logs de erro.
+
+---
+
+## 5. Planejamento de Tarefas por Desenvolvedor
+
+### Eliabe (Frontend / Apoio Backend)
+*   **Projetos e Módulos**: Ajustes no layout base do Angular e reestruturação completa das telas de listagem e cadastro de Projetos e Módulos.
+*   **Gestão de Demandas**: Criação das telas Angular para listagem, visualização e cadastro de Demandas associadas a projetos. Apoio na implementação dos endpoints REST de Demandas no backend.
+*   **Telas de Gestão da Execução (Human-in-the-Loop)**:
+    *   **Tela de Acompanhamento do Workflow**: Implementação da listagem e acompanhamento visual do progresso sequencial do workflow, dividindo os agentes (etapas) em concluídos, em andamento e aguardando o anterior começar.
+    *   **Tela de Detalhes do Agente**: Criação da tela acessível por clique no agente, exibindo logs de execução em tempo real (RxJS HttpClient Polling ou WebSockets) e exibindo a lista de artefatos gerados/alterados ao concluir a execução.
+    *   **Interações do Loop Humano**: Implementação dos botões e fluxos para aprovação, rejeição e envio de prompt adicional para correção integrando com os novos endpoints do backend (`/aprovar`, `/rejeitar` e `/corrigir`).
+
+### Gustavo (Backend)
+*   **Coding Agent**: Migração, acoplamento e testes do motor base do Coding Agent (leitura de tarefas e geração do código-fonte adaptado).
+*   **Coding Agent Sandbox & Git Writer**: Configuração do ambiente isolado (sandbox Docker) para build/validação das execuções do Coding Agent, e automação de operações de escrita do Git (commits, push de branch de feature).
+
+### Paulo (Backend)
+*   **Projetos**: Reestruturação das entidades JPA e fluxo de cadastro/listagem de Projetos (endpoints, service, repository).
+*   **Módulos**: Reestruturação das entidades JPA e fluxo de cadastro/listagem de Módulos (endpoints, service, repository).
+*   **Gestão de Demandas**: Desenvolvimento completo das regras de negócio e endpoints REST para o CRUD de Demandas.
+*   **Motor Dinâmico**: Início da evolução do motor de workflow fixo para o modelo dinâmico e persistente modelado no banco de dados.
+*   **Orquestrador de Workflows**: Finalização do orquestrador de workflows sequencial e assíncrono, persistindo a transição de estados das tabelas `ExecucaoWorkflow` e `ExecucaoAgente`.
+*   **Preparação de Repositórios (Git)**: Implementação do preparador de diretório local (Workspace Manager) que realiza clone, fetch, pull e checkout de repositórios do projeto e módulos para uso em modo Somente Leitura pelo Agente Genérico, permitindo controle de escrita (commit/push) exclusivamente para repositórios de documentação.
+*   **Agente Genérico e Custom Tools**: Implementação da classe base e inicialização dinâmica do Agente Genérico (carregamento de prompts, ferramentas e conhecimentos). Desenvolvimento e registro das tools padrão do sistema (como `file_reader`).
+
+### Backlog
+*   **SSO e Segurança Backend**: Criação dos scripts SQL de permissões e configuração final de segurança (Spring Security e roles) do SSO no backend.
+*   **SSO e Segurança Frontend**: Integração do SSO com o frontend Angular, configurando as rotas, guards e filtros visuais baseados em roles de usuário. Apoio nos testes integrados de homologação.
+*   **Loop Humano**: Criação dos endpoints para interação humana (`/aprovar`, `/reprovar`, `/corrigir`) e acoplamento com a persistência de estados das execuções.
+*   **Gestão de Conhecimento**: Implementação das APIs e fluxos de upload de arquivos para a base de `Conhecimento` dos agentes.
+*   **Auditoria**: Criação das tabelas de auditoria no banco de dados e implementação do interceptador no backend (AOP/Spring Data JPA Auditing) para registrar e recuperar as ações dos usuários a partir do token de login (SSO). Exposição do endpoint `/auditoria`.
+
+---
+
+### Principais Marcos de Entrega (Milestones Consolidados)
+*   Projetos e Módulos reestruturados de forma integrada e 100% funcionais localmente.
+*   Cadastro de Demandas ativo na UI e persistência básica do motor de workflow dinâmico.
+*   Motor de workflow dinâmico ativo capaz de instanciar o **Agente Genérico** (carregado com prompts, tools e conhecimentos em modo Somente Leitura) e persistir o controle de ações via Angular.
+*   **Coding Agent** e sandbox Docker integrados e autorizados a realizar modificações, commits e pushes nos repositórios Git.
+*   Sistema completamente integrado ao SSO com controle de permissões ativo, gestão de conhecimento e pronto para homologação/produção.
+
+---
+
+## 6. Plano de Validação e Testes Fullstack
+
+Para validar a integridade fullstack do sistema, a seguinte matriz de testes deve ser cumprida:
+
+1.  **Testes de Segurança End-to-End**:
+    *   Autenticar um usuário SSO com papel comum e tentar forçar rotas de admin ou acessar/alterar projetos em que ele não possua a role necessária (verificar tratamento de erro e redirecionamento no Angular).
+2.  **Testes do Fluxo "Human-in-the-Loop"**:
+    *   Disparar o workflow pelo frontend.
+    *   Confirmar que o frontend reflete o status `AGUARDANDO_APROVACAO` e exibe o campo para entrada de nova correção.
+    *   Enviar uma instrução de correção pelo frontend e constatar se o backend retoma a execução do mesmo agente atualizando o painel de logs.
+3.  **Métrica de Cobertura de Testes Automatizados**:
+    *   Alcançar cobertura mínima de **75%** do código de serviços do backend com testes de unidade.
+    *   Componentes e serviços Angular validados por meio de testes unitários com Jasmine/Jest.
